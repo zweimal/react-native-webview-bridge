@@ -14,8 +14,10 @@
 
 #import "RCTBridge.h"
 #import "RCTUIManager.h"
+#import "RCTSparseArray.h"
 #import "RCTWebViewBridge.h"
 #import "UIView+React.h"
+
 
 @interface RCTWebViewBridgeManager () <RCTWebViewBridgeDelegate>
 
@@ -68,7 +70,7 @@ RCT_EXPORT_VIEW_PROPERTY(onBridgeMessage, RCTDirectEventBlock)
 
 RCT_EXPORT_METHOD(goBack:(nonnull NSNumber *)reactTag)
 {
-  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RCTWebViewBridge *> *viewRegistry) {
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, RCTSparseArray *viewRegistry) {
     RCTWebViewBridge *view = viewRegistry[reactTag];
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
@@ -80,7 +82,7 @@ RCT_EXPORT_METHOD(goBack:(nonnull NSNumber *)reactTag)
 
 RCT_EXPORT_METHOD(goForward:(nonnull NSNumber *)reactTag)
 {
-  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry) {
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, RCTSparseArray *viewRegistry) {
     id view = viewRegistry[reactTag];
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
@@ -92,7 +94,7 @@ RCT_EXPORT_METHOD(goForward:(nonnull NSNumber *)reactTag)
 
 RCT_EXPORT_METHOD(reload:(nonnull NSNumber *)reactTag)
 {
-  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RCTWebViewBridge *> *viewRegistry) {
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, RCTSparseArray *viewRegistry) {
     RCTWebViewBridge *view = viewRegistry[reactTag];
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
@@ -105,7 +107,7 @@ RCT_EXPORT_METHOD(reload:(nonnull NSNumber *)reactTag)
 RCT_EXPORT_METHOD(sendToBridge:(nonnull NSNumber *)reactTag
                   value:(NSString*)message)
 {
-  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RCTWebViewBridge *> *viewRegistry) {
+  [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, RCTSparseArray *viewRegistry) {
     RCTWebViewBridge *view = viewRegistry[reactTag];
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
