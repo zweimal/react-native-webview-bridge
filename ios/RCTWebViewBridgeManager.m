@@ -16,47 +16,33 @@
 #import "RCTUIManager.h"
 #import "RCTSparseArray.h"
 #import "RCTWebViewBridge.h"
-#import "UIView+React.h"
 
-
-@interface RCTWebViewBridgeManager () <RCTWebViewBridgeDelegate>
-
-@end
 
 @implementation RCTWebViewBridgeManager
-{
-  NSConditionLock *_shouldStartLoadLock;
-  BOOL _shouldStartLoad;
-}
 
 RCT_EXPORT_MODULE()
 
 - (UIView *)view
 {
-  RCTWebViewBridge *webView = [RCTWebViewBridge new];
-  webView.delegate = self;
-  return webView;
+  return [RCTWebViewBridge new];
 }
 
-RCT_REMAP_VIEW_PROPERTY(url, URL, NSURL)
-RCT_REMAP_VIEW_PROPERTY(html, HTML, NSString)
-RCT_REMAP_VIEW_PROPERTY(bounces, _webView.scrollView.bounces, BOOL)
-RCT_REMAP_VIEW_PROPERTY(scrollEnabled, _webView.scrollView.scrollEnabled, BOOL)
-RCT_REMAP_VIEW_PROPERTY(scalesPageToFit, _webView.scalesPageToFit, BOOL)
-RCT_EXPORT_VIEW_PROPERTY(injectedJavaScript, NSString)
-RCT_EXPORT_VIEW_PROPERTY(contentInset, UIEdgeInsets)
-RCT_EXPORT_VIEW_PROPERTY(automaticallyAdjustContentInsets, BOOL)
-RCT_EXPORT_VIEW_PROPERTY(onLoadingStart, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onLoadingFinish, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onLoadingError, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onShouldStartLoadWithRequest, RCTDirectEventBlock)
-RCT_REMAP_VIEW_PROPERTY(allowsInlineMediaPlayback, _webView.allowsInlineMediaPlayback, BOOL)
-RCT_EXPORT_VIEW_PROPERTY(onBridgeMessage, RCTDirectEventBlock)
+RCT_REMAP_VIEW_PROPERTY(url, URL, NSURL);
+RCT_REMAP_VIEW_PROPERTY(html, HTML, NSString);
+RCT_REMAP_VIEW_PROPERTY(bounces, _webView.scrollView.bounces, BOOL);
+RCT_REMAP_VIEW_PROPERTY(scrollEnabled, _webView.scrollView.scrollEnabled, BOOL);
+RCT_REMAP_VIEW_PROPERTY(scalesPageToFit, _webView.scalesPageToFit, BOOL);
+RCT_EXPORT_VIEW_PROPERTY(injectedJavaScript, NSString);
+RCT_EXPORT_VIEW_PROPERTY(contentInset, UIEdgeInsets);
+RCT_EXPORT_VIEW_PROPERTY(automaticallyAdjustContentInsets, BOOL);
+RCT_EXPORT_VIEW_PROPERTY(onLoadingStart, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onLoadingFinish, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onLoadingError, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onNativeMessage, RCTDirectEventBlock);
 
 - (NSDictionary<NSString *, id> *)constantsToExport
 {
   return @{
-    @"JSNavigationScheme": RCTJSNavigationScheme,
     @"NavigationType": @{
       @"LinkClicked": @(UIWebViewNavigationTypeLinkClicked),
       @"FormSubmitted": @(UIWebViewNavigationTypeFormSubmitted),
@@ -87,7 +73,7 @@ RCT_EXPORT_METHOD(goForward:(nonnull NSNumber *)reactTag)
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
     } else {
-      [view goForward];
+      [(RCTWebViewBridge *)view goForward];
     }
   }];
 }
@@ -104,51 +90,17 @@ RCT_EXPORT_METHOD(reload:(nonnull NSNumber *)reactTag)
   }];
 }
 
-RCT_EXPORT_METHOD(sendToBridge:(nonnull NSNumber *)reactTag
-                  value:(NSString*)message)
+RCT_EXPORT_METHOD(sendMessageToJS:(nonnull NSNumber *)reactTag
+                  value:(id)message)
 {
   [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, RCTSparseArray *viewRegistry) {
     RCTWebViewBridge *view = viewRegistry[reactTag];
     if (![view isKindOfClass:[RCTWebViewBridge class]]) {
       RCTLogError(@"Invalid view returned from registry, expecting RCTWebViewBridge, got: %@", view);
     } else {
-      [view sendToBridge: message];
+      [view sendMessageToJS: message];
     }
   }];
-}
-
-#pragma mark - Exported synchronous methods
-
-- (BOOL)webView:(__unused RCTWebViewBridge *)webView
-shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
-   withCallback:(RCTDirectEventBlock)callback
-{
-  _shouldStartLoadLock = [[NSConditionLock alloc] initWithCondition:arc4random()];
-  _shouldStartLoad = YES;
-  request[@"lockIdentifier"] = @(_shouldStartLoadLock.condition);
-  callback(request);
-
-  // Block the main thread for a maximum of 250ms until the JS thread returns
-  if ([_shouldStartLoadLock lockWhenCondition:0 beforeDate:[NSDate dateWithTimeIntervalSinceNow:.25]]) {
-    BOOL returnValue = _shouldStartLoad;
-    [_shouldStartLoadLock unlock];
-    _shouldStartLoadLock = nil;
-    return returnValue;
-  } else {
-    RCTLogWarn(@"Did not receive response to shouldStartLoad in time, defaulting to YES");
-    return YES;
-  }
-}
-
-RCT_EXPORT_METHOD(startLoadWithResult:(BOOL)result lockIdentifier:(NSInteger)lockIdentifier)
-{
-  if ([_shouldStartLoadLock tryLockWhenCondition:lockIdentifier]) {
-    _shouldStartLoad = result;
-    [_shouldStartLoadLock unlockWithCondition:0];
-  } else {
-    RCTLogWarn(@"startLoadWithResult invoked with invalid lockIdentifier: "
-               "got %zd, expected %zd", lockIdentifier, _shouldStartLoadLock.condition);
-  }
 }
 
 @end

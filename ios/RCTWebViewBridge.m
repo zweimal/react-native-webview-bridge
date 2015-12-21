@@ -12,37 +12,33 @@
 
 #import "RCTWebViewBridge.h"
 
-#import <UIKit/UIKit.h>
+@import WebKit;
 
 #import "RCTAutoInsetsProtocol.h"
 #import "RCTEventDispatcher.h"
 #import "RCTLog.h"
 #import "RCTUtils.h"
 #import "RCTView.h"
-#import "UIView+React.h"
 
 //This is a very elegent way of defining multiline string in objective-c.
 //source: http://stackoverflow.com/a/23387659/828487
 #define NSStringMultiline(...) [[NSString alloc] initWithCString:#__VA_ARGS__ encoding:NSUTF8StringEncoding]
 
+void (^nullBlock)(id, NSError *)  = ^(id outcome, NSError * error) {};
 
-//we don'e need this one since it has been defined in RCTWebView.m
-//NSString *const RCTJSNavigationScheme = @"react-js-navigation";
-NSString *const RCTWebViewBridgeSchema = @"wvb";
 
-@interface RCTWebViewBridge () <UIWebViewDelegate, RCTAutoInsetsProtocol>
+@interface RCTWebViewBridge () <WKScriptMessageHandler, WKNavigationDelegate, RCTAutoInsetsProtocol>
 
 @property (nonatomic, copy) RCTDirectEventBlock onLoadingStart;
 @property (nonatomic, copy) RCTDirectEventBlock onLoadingFinish;
 @property (nonatomic, copy) RCTDirectEventBlock onLoadingError;
-@property (nonatomic, copy) RCTDirectEventBlock onShouldStartLoadWithRequest;
-@property (nonatomic, copy) RCTDirectEventBlock onBridgeMessage;
+@property (nonatomic, copy) RCTDirectEventBlock onNativeMessage;
 
 @end
 
 @implementation RCTWebViewBridge
 {
-  UIWebView *_webView;
+  WKWebView *_webView;
   NSString *_injectedJavaScript;
 }
 
@@ -52,8 +48,19 @@ NSString *const RCTWebViewBridgeSchema = @"wvb";
     super.backgroundColor = [UIColor clearColor];
     _automaticallyAdjustContentInsets = YES;
     _contentInset = UIEdgeInsetsZero;
-    _webView = [[UIWebView alloc] initWithFrame:self.bounds];
-    _webView.delegate = self;
+    WKUserContentController *userController = [[WKUserContentController alloc] init];
+    [userController addUserScript: [
+      [WKUserScript alloc] initWithSource: self.webViewBridgeScript
+        injectionTime: WKUserScriptInjectionTimeAtDocumentStart
+        forMainFrameOnly: TRUE
+      ]
+    ];
+    [userController addScriptMessageHandler: self name: @"bridgeMessage"];
+      
+    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    configuration.userContentController = userController;
+    _webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:configuration];
+    _webView.navigationDelegate = self;
     [self addSubview:_webView];
   }
   return self;
@@ -76,25 +83,37 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
   [_webView reload];
 }
 
-- (void)sendToBridge:(NSString *)message
+- (void) evaluateJS: (NSString *)javaScriptString completionHandler: (id)completionHandler
 {
-  //we are warpping the send message in a function to make sure that if
-  //WebView is not injected, we don't crash the app.
-  NSString *format = NSStringMultiline(
-    (function(){
-      if (WebViewBridge && WebViewBridge.__push__) {
-        WebViewBridge.__push__('%@');
-      }
-    }());
-  );
-
-  NSString *command = [NSString stringWithFormat: format, message];
-  [_webView stringByEvaluatingJavaScriptFromString:command];
+  [_webView evaluateJavaScript:javaScriptString completionHandler: completionHandler];
 }
+
+- (void) sendMessageToJS: (id)message
+{
+  [self evaluateJS: [self objectToJsonString: message] completionHandler: nullBlock];
+}
+
+- (NSString*)objectToJsonString:(id)object
+{
+  NSError *error;
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:object
+                                                     options: 0
+                                                       error:&error];
+
+  if (! jsonData) {
+    NSLog(@"objectToJsonString: error: %@", error.localizedDescription);
+    return @"";
+  } else {
+    NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    return [NSString stringWithFormat:@"WebViewBridge.receive(%@);", json];
+  }
+
+}
+
 
 - (NSURL *)URL
 {
-  return _webView.request.URL;
+  return _webView.URL;
 }
 
 - (void)setURL:(NSURL *)URL
@@ -103,7 +122,7 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
   // passing the redirect urls back here, so we ignore them if trying to load
   // the same url. We'll expose a call to 'reload' to allow a user to load
   // the existing page.
-  if ([URL isEqual:_webView.request.URL]) {
+  if ([URL isEqual:_webView.URL]) {
     return;
   }
   if (!URL) {
@@ -148,9 +167,9 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
 - (NSMutableDictionary<NSString *, id> *)baseEvent
 {
   NSMutableDictionary<NSString *, id> *event = [[NSMutableDictionary alloc] initWithDictionary:@{
-    @"url": _webView.request.URL.absoluteString ?: @"",
+    @"url": _webView.URL.absoluteString ?: @"",
     @"loading" : @(_webView.loading),
-    @"title": [_webView stringByEvaluatingJavaScriptFromString:@"document.title"],
+    @"title": _webView.title,
     @"canGoBack": @(_webView.canGoBack),
     @"canGoForward" : @(_webView.canGoForward),
   }];
@@ -165,57 +184,36 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
                       updateOffset:YES];
 }
 
-#pragma mark - UIWebViewDelegate methods
 
-- (BOOL)webView:(__unused UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request
- navigationType:(UIWebViewNavigationType)navigationType
+#pragma mark - WKScriptMessageHandler
+- (void) userContentController: (WKUserContentController *)userContentController didReceiveScriptMessage: (WKScriptMessage *)message
 {
-  BOOL isJSNavigation = [request.URL.scheme isEqualToString:RCTJSNavigationScheme];
-
-  if (!isJSNavigation && [request.URL.scheme isEqualToString:RCTWebViewBridgeSchema]) {
-    NSString* message = [webView stringByEvaluatingJavaScriptFromString:@"WebViewBridge.__fetch__()"];
-
-    NSMutableDictionary<NSString *, id> *onBridgeMessageEvent = [[NSMutableDictionary alloc] initWithDictionary:@{
-      @"messages": [self stringArrayJsonToArray: message]
-    }];
-
-    _onBridgeMessage(onBridgeMessageEvent);
-
-    isJSNavigation = YES;
-  }
-
-  // skip this for the JS Navigation handler
-  if (!isJSNavigation && _onShouldStartLoadWithRequest) {
-    NSMutableDictionary<NSString *, id> *event = [self baseEvent];
-    [event addEntriesFromDictionary: @{
-      @"url": (request.URL).absoluteString,
-      @"navigationType": @(navigationType)
-    }];
-    if (![self.delegate webView:self
-      shouldStartLoadForRequest:event
-                   withCallback:_onShouldStartLoadWithRequest]) {
-      return NO;
-    }
-  }
-
-  if (_onLoadingStart) {
-    // We have this check to filter out iframe requests and whatnot
-    BOOL isTopFrame = [request.URL isEqual:request.mainDocumentURL];
-    if (isTopFrame) {
+    if (_onNativeMessage) {
       NSMutableDictionary<NSString *, id> *event = [self baseEvent];
       [event addEntriesFromDictionary: @{
-        @"url": (request.URL).absoluteString,
-        @"navigationType": @(navigationType)
+        @"message": message.body
       }];
-      _onLoadingStart(event);
+      
+      _onNativeMessage(event);
     }
-  }
-
-  // JS Navigation handler
-  return !isJSNavigation;
 }
 
-- (void)webView:(__unused UIWebView *)webView didFailLoadWithError:(NSError *)error
+#pragma mark - WKNavigationDelegate
+
+- (void) webView: (WKWebView *)webView didStartProvisionalNavigation: (WKNavigation *)navigation
+{
+  NSURL* url = webView.URL;
+
+  if (_onLoadingStart) {
+    NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+    [event addEntriesFromDictionary: @{
+      @"url": url.absoluteString
+    }];
+    _onLoadingStart(event);
+  }
+}
+
+- (void) webView: (WKWebView *)webView didFailProvisionalNavigation: (WKNavigation *)navigation withError: (NSError *)error
 {
   if (_onLoadingError) {
     if ([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) {
@@ -236,43 +234,31 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
   }
 }
 
-- (void)webViewDidFinishLoad:(UIWebView *)webView
+
+
+- (void) webView: (WKWebView *)webView didFinishNavigation: (WKNavigation *)navigation
 {
   //injecting WebViewBridge Script
-  NSString *webViewBridgeScriptContent = [self webViewBridgeScript];
-  [webView stringByEvaluatingJavaScriptFromString:webViewBridgeScriptContent];
-  //////////////////////////////////////////////////////////////////////////////
-
   if (_injectedJavaScript != nil) {
-    NSString *jsEvaluationValue = [webView stringByEvaluatingJavaScriptFromString:_injectedJavaScript];
-
-    NSMutableDictionary<NSString *, id> *event = [self baseEvent];
-    event[@"jsEvaluationValue"] = jsEvaluationValue;
-
-    _onLoadingFinish(event);
+    [webView evaluateJavaScript:_injectedJavaScript
+      completionHandler:^(id outcome, NSError *error) {
+        NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+        event[@"jsEvaluationValue"] = outcome;
+     
+        _onLoadingFinish(event);
+      }
+    ];
   }
   // we only need the final 'finishLoad' call so only fire the event when we're actually done loading.
-  else if (_onLoadingFinish && !webView.loading && ![webView.request.URL.absoluteString isEqualToString:@"about:blank"]) {
+  else if (_onLoadingFinish && !webView.loading && ![webView.URL.absoluteString isEqualToString:@"about:blank"]) {
     _onLoadingFinish([self baseEvent]);
   }
-}
-
-- (NSArray*)stringArrayJsonToArray:(NSString *)message
-{
-  return [NSJSONSerialization JSONObjectWithData:[message dataUsingEncoding:NSUTF8StringEncoding]
-                                         options:NSJSONReadingAllowFragments
-                                           error:nil];
+  
 }
 
 //since there is no easy way to load the static lib resource in ios,
 //we are loading the script from this method.
-- (NSString *)webViewBridgeScript {
-  // NSBundle *bundle = [NSBundle mainBundle];
-  // NSString *webViewBridgeScriptFile = [bundle pathForResource:@"webviewbridge"
-  //                                                      ofType:@"js"];
-  // NSString *webViewBridgeScriptContent = [NSString stringWithContentsOfFile:webViewBridgeScriptFile
-  //                                                                  encoding:NSUTF8StringEncoding
-  //                                                                     error:nil];
+- (NSString *) webViewBridgeScript {
 
   return NSStringMultiline(
     (function (window) {
@@ -283,69 +269,32 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
         return;
       }
 
-      var RNWBSchema = 'wvb';
-      var sendQueue = [];
-      var receiveQueue = [];
-      var doc = window.document;
-      var customEvent = doc.createEvent('Event');
-
       function callFunc(func, message) {
         if ('function' === typeof func) {
           func(message);
         }
       }
 
-      function signalNative() {
-        window.location = RNWBSchema + '://message' + new Date().getTime();
-      }
-
-      //I made the private function ugly signiture so user doesn't called them accidently.
-      //if you do, then I have nothing to say. :(
       var WebViewBridge = {
-        //this function will be called by native side to push a new message
-        //to webview.
-        __push__: function (message) {
-          receiveQueue.push(message);
-          //reason I need this setTmeout is to return this function as fast as
-          //possible to release the native side thread.
-          setTimeout(function () {
-            var message = receiveQueue.pop();
-            callFunc(WebViewBridge.onMessage, message);
-          }, 15); //this magic number is just a random small value. I don't like 0.
+        
+        receive: function (message) {
+          callFunc(WebViewBridge.onMessageReceived, message);
         },
-        __fetch__: function () {
-          //since our sendQueue array only contains string, and our connection to native
-          //can only accept string, we need to convert array of strings into single string.
-          var messages = JSON.stringify(sendQueue);
-
-          //we make sure that sendQueue is resets
-          sendQueue = [];
-
-          //return the messages back to native side.
-          return messages;
-        },
-        //make sure message is string. because only string can be sent to native,
-        //if you don't pass it as string, onError function will be called.
+          
         send: function (message) {
-          if ('string' !== typeof message) {
-            callFunc(WebViewBridge.onError, "message is type '" + typeof message + "', and it needs to be string");
-            return;
-          }
-
-          //we queue the messages to make sure that native can collects all of them in one shot.
-          sendQueue.push(message);
-          //signal the objective-c that there is a message in the queue
-          signalNative();
+          window.webkit.messageHandlers.bridgeMessage.postMessage(message);
+          callFunc(this.onMessageSent, message);
         },
-        onMessage: null,
-        onError: null
+        onMessageReceived: null,
+        onMessageSent: null,
       };
 
       window.WebViewBridge = WebViewBridge;
 
       //dispatch event
+      var customEvent = doc.createEvent('Event');
       customEvent.initEvent('WebViewBridge', true, true);
-      doc.dispatchEvent(customEvent);
+      window.document.dispatchEvent(customEvent);
     }(window));
   );
 }

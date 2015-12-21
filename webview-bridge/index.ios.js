@@ -125,27 +125,9 @@ var WebViewBridge = React.createClass({
     scalesPageToFit: PropTypes.bool,
 
     /**
-     * Allows custom handling of any webview requests by a JS handler. Return true
-     * or false from this method to continue loading the request.
-     * @platform ios
-     */
-    onShouldStartLoadWithRequest: PropTypes.func,
-
-    /**
-     * Determines whether HTML5 videos play inline or use the native full-screen
-     * controller.
-     * default value `false`
-     * **NOTE** : "In order for video to play inline, not only does this
-     * property need to be set to true, but the video element in the HTML
-     * document must also include the webkit-playsinline attribute."
-     * @platform ios
-     */
-    allowsInlineMediaPlayback: PropTypes.bool,
-
-    /**
      * Will be called once the message is being sent from webview
      */
-    onBridgeMessage: PropTypes.func,
+    onNativeMessage: PropTypes.func,
   },
 
   getInitialState: function() {
@@ -191,19 +173,11 @@ var WebViewBridge = React.createClass({
       webViewBridgeStyles.push(styles.hidden);
     }
 
-    var onShouldStartLoadWithRequest = this.props.onShouldStartLoadWithRequest && ((event: Event) => {
-      var shouldStart = this.props.onShouldStartLoadWithRequest &&
-        this.props.onShouldStartLoadWithRequest(event.nativeEvent);
-      WebViewBridgeManager.startLoadWithResult(!!shouldStart, event.nativeEvent.lockIdentifier);
-    });
-
-    var onBridgeMessage = (event: Event) => {
-      var onBridgeMessageCallback = this.props.onBridgeMessage;
-      if (onBridgeMessageCallback) {
-        const messages = event.nativeEvent.messages;
-        messages.forEach((message) => {
-          onBridgeMessageCallback(message);
-        });
+    var onNativeMessage = (event: Event) => {
+      var onNativeMessageCallback = this.props.onNativeMessage;
+      if (onNativeMessageCallback) {
+        const message = event.nativeEvent.message;
+        onNativeMessageCallback(message);
       }
     };
 
@@ -222,10 +196,8 @@ var WebViewBridge = React.createClass({
         onLoadingStart={this.onLoadingStart}
         onLoadingFinish={this.onLoadingFinish}
         onLoadingError={this.onLoadingError}
-        onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         scalesPageToFit={this.props.scalesPageToFit}
-        allowsInlineMediaPlayback={this.props.allowsInlineMediaPlayback}
-        onBridgeMessage={onBridgeMessage}
+        onNativeMessage={onNativeMessage}
       />;
 
     return (
@@ -248,8 +220,8 @@ var WebViewBridge = React.createClass({
     WebViewBridgeManager.reload(this.getWebViewBridgeHandle());
   },
 
-  sendToBridge: function (message) {
-    WebViewBridgeManager.sendToBridge(this.getWebViewBridgeHandle(), message);
+  sendMessageToJS: function (message) {
+    WebViewBridgeManager.sendMessageToJS(this.getWebViewBridgeHandle(), message);
   },
 
   /**

@@ -11,37 +11,21 @@
  */
 
 #import "RCTView.h"
+@import WebKit;
 
 @class RCTWebViewBridge;
 
-/**
- * Special scheme used to pass messages to the injectedJavaScript
- * code without triggering a page load. Usage:
- *
- *   window.location.href = RCTJSNavigationScheme + '://hello'
- */
-extern NSString *const RCTJSNavigationScheme;
-
-@protocol RCTWebViewBridgeDelegate <NSObject>
-
-- (BOOL)webView:(RCTWebViewBridge *)webView
-shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *)request
-   withCallback:(RCTDirectEventBlock)callback;
-
-@end
-
 @interface RCTWebViewBridge : RCTView
 
-@property (nonatomic, weak) id<RCTWebViewBridgeDelegate> delegate;
-
-@property (nonatomic, strong) NSURL *URL;
+@property (nonatomic, strong) NSURL * URL;
 @property (nonatomic, assign) UIEdgeInsets contentInset;
 @property (nonatomic, assign) BOOL automaticallyAdjustContentInsets;
 @property (nonatomic, copy) NSString *injectedJavaScript;
 
-- (void)goForward;
-- (void)goBack;
-- (void)reload;
-- (void)sendToBridge:(NSString *)message;
+- (void) goForward;
+- (void) goBack;
+- (void) reload;
+//- (void) evaluateJS: (NSString *)javaScriptString completionHandler: (RCTDirectEventBlock)completionHandler;
+- (void) sendMessageToJS: (id)object;
 
 @end
